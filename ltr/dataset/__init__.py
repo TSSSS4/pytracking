@@ -3,3 +3,6 @@ from .got10k import Got10k
 from .tracking_net import TrackingNet
 from .imagenetvid import ImagenetVID
 from .coco_seq import MSCOCOSeq
+from .davis import DAVIS
+from .vot2016 import VOT2016
+from .youtubevos import YouTubeVOS_2018

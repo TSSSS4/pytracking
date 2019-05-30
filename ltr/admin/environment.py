@@ -15,7 +15,8 @@ def create_default_local_file():
         'trackingnet_dir': empty_str,
         'coco_dir': empty_str,
         'imagenet_dir': empty_str,
-        'imagenetdet_dir': empty_str})
+        'imagenetdet_dir': empty_str,
+        'davis_dir': empty_str})
 
     comment = {'workspace_dir': 'Base directory for saving network checkpoints.',
                'tensorboard_dir': 'Directory for tensorboard files.'}

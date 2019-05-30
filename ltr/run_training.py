@@ -12,6 +12,8 @@ if env_path not in sys.path:
 
 import ltr.admin.settings as ws_settings
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+
 
 def run_training(train_module, train_name, cudnn_benchmark=True):
     """Run a train scripts in train_settings.
@@ -44,14 +46,21 @@ def run_training(train_module, train_name, cudnn_benchmark=True):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run a train scripts in train_settings.')
-    parser.add_argument('train_module', type=str, help='Name of module in the "train_settings/" folder.')
-    parser.add_argument('train_name', type=str, help='Name of the train settings file.')
-    parser.add_argument('--cudnn_benchmark', type=bool, default=True, help='Set cudnn benchmark on (1) or off (0) (default is on).')
+    # parser = argparse.ArgumentParser(description='Run a train scripts in train_settings.')
+    # parser.add_argument('train_module', type=str, default='bbreg',
+    #                     help='Name of module in the "train_settings/" folder.')
+    # parser.add_argument('train_name', type=str, default='atom_default',
+    #                     help='Name of the train settings file.')
+    # parser.add_argument('--cudnn_benchmark', type=bool, default=True,
+    #                     help='Set cudnn benchmark on (1) or off (0) (default is on).')
+    #
+    # args = parser.parse_args()
+    #
+    # run_training(args.train_module, args.train_name, args.cudnn_benchmark)
 
-    args = parser.parse_args()
+    # run_training(train_module='bbreg', train_name='atom1', cudnn_benchmark=True)
 
-    run_training(args.train_module, args.train_name, args.cudnn_benchmark)
+    run_training(train_module='ecoseg', train_name='finetune', cudnn_benchmark=True)
 
 
 if __name__ == '__main__':

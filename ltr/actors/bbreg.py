@@ -27,3 +27,4 @@ class AtomActor(BaseActor):
                  'Loss/iou': loss.item()}
 
         return loss, stats
+

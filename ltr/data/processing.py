@@ -1,5 +1,6 @@
 import torch
 import torchvision.transforms as transforms
+import cv2
 from pytracking import TensorDict
 import ltr.data.processing_utils as prutils
 
@@ -135,7 +136,7 @@ class ATOMProcessing(BaseProcessing):
 
             # Crop image region centered at jittered_anno box
             crops, boxes = prutils.jittered_center_crop(data[s + '_images'], jittered_anno, data[s + '_anno'],
-                                                self.search_area_factor, self.output_sz)
+                                                        self.search_area_factor, self.output_sz)
 
             # Apply transforms
             data[s + '_images'] = [self.transform[s](x) for x in crops]
@@ -146,6 +147,157 @@ class ATOMProcessing(BaseProcessing):
 
         data['test_proposals'] = list(frame2_proposals)
         data['proposal_iou'] = list(gt_iou)
+
+        # Prepare output
+        if self.mode == 'sequence':
+            data = data.apply(prutils.stack_tensors)
+        else:
+            data = data.apply(lambda x: x[0] if isinstance(x, list) else x)
+
+        return data
+
+
+class ECOSegProcessing(BaseProcessing):
+    """ The processing class used for training ECOSeg. The images are processed in the following way.
+    First, the target bounding box is jittered by adding some noise. Next, a square region (called search region )
+    centered at the jittered target center, and of area search_area_factor^2 times the area of the jittered box is
+    cropped from the image. The reason for jittering the target box is to avoid learning the bias that the target is
+    always at the center of the search region. The search region is then resized to a fixed size given by the
+    argument output_sz. A set of proposals are then generated for the test images by jittering the ground truth box.
+
+    """
+    def __init__(self, search_area_factor, output_sz, mask_size, center_jitter_factor, scale_jitter_factor, proposal_params,
+                 mode='pair', *args, **kwargs):
+        """
+        args:
+            search_area_factor - The size of the search region  relative to the target size.
+            output_sz - An integer, denoting the size to which the search region is resized. The search region is always
+                        square.
+            center_jitter_factor - A dict containing the amount of jittering to be applied to the target center before
+                                    extracting the search region. See _get_jittered_box for how the jittering is done.
+            scale_jitter_factor - A dict containing the amount of jittering to be applied to the target size before
+                                    extracting the search region. See _get_jittered_box for how the jittering is done.
+            proposal_params - Arguments for the proposal generation process. See _generate_proposals for details.
+            mode - Either 'pair' or 'sequence'. If mode='sequence', then output has an extra dimension for frames
+        """
+        super().__init__(*args, **kwargs)
+        self.search_area_factor = search_area_factor
+        self.output_sz = output_sz
+        self.mask_size = mask_size
+        self.center_jitter_factor = center_jitter_factor
+        self.scale_jitter_factor = scale_jitter_factor
+        self.proposal_params = proposal_params
+        self.mode = mode
+
+    def _get_jittered_box(self, box, mode):
+        """ Jitter the input box
+        args:
+            box - input bounding box
+            mode - string 'train' or 'test' indicating train or test data
+
+        returns:
+            torch.Tensor - jittered box
+        """
+
+        jittered_size = box[2:4] * torch.exp(torch.randn(2) * self.scale_jitter_factor[mode])
+        max_offset = (jittered_size.prod().sqrt() * self.center_jitter_factor[mode]).item()
+        jittered_center = box[0:2] + 0.5 * (box[2:4] - 1) + max_offset * (torch.rand(2) - 0.5)
+
+        return torch.cat((jittered_center - 0.5 * (jittered_size - 1), jittered_size), dim=0)
+
+    def _generate_proposals(self, box):
+        """ Generates proposals by adding noise to the input box
+        args:
+            box - input box
+
+        returns:
+            torch.Tensor - Array of shape (num_proposals, 4) containing proposals
+            torch.Tensor - Array of shape (num_proposals,) containing IoU overlap of each proposal with the input box. The
+                        IoU is mapped to [-1, 1]
+        """
+        # Generate proposals
+        num_proposals = self.proposal_params['boxes_per_frame']
+        proposals = torch.zeros((num_proposals, 4))
+        gt_iou = torch.zeros(num_proposals)
+
+        for i in range(num_proposals):
+            proposals[i, :], gt_iou[i] = prutils.perturb_box(box, min_iou=self.proposal_params['min_iou'],
+                                                             sigma_factor=self.proposal_params['sigma_factor']
+                                                             )
+
+        # Map to [-1, 1]
+        gt_iou = gt_iou * 2 - 1
+        return proposals, gt_iou
+
+    def _mask_crop(self, masks, bboxs):
+        mask_size = self.mask_size
+        num_proposals = self.proposal_params['boxes_per_frame']
+        masks_cropped = []
+        for mask, bbox in zip(masks, bboxs):
+            mask_cropped = []
+            x1, y1, w, h = bbox.round().int()                 # (x2,y2) = (x1,y1)  + (w,h) - 1
+            mask = mask[y1:y1+h, x1:x1+w]   # mask[y1:y2+1, x1:x2+1]
+            mask = cv2.resize(mask, (mask_size, mask_size))
+
+            for _ in range(num_proposals):
+                mask_cropped.append(mask.copy())
+            masks_cropped.append(torch.Tensor(mask_cropped))
+
+        return masks_cropped
+
+    def __call__(self, data: TensorDict):
+        """
+        args:
+            data - The input data, should contain the following fields:
+                'train_images'  -
+                'test_images'   -
+                'train_anno'    -
+                'test_anno'     -
+
+        returns:
+            TensorDict - output data block with following fields:
+                'train_images'  -
+                'test_images'   -
+                'train_mask'    -
+                'test_mask'    -
+                'train_anno'    -
+                'test_anno'     -
+                'test_proposals'-
+                'proposal_iou'  -
+        """
+        # Apply joint transforms
+        if self.transform['joint'] is not None:
+            num_train_images = len(data['train_images'])
+            all_images = data['train_images'] + data['test_images']
+            all_images_trans = self.transform['joint'](*all_images)
+
+            data['train_images'] = all_images_trans[:num_train_images]
+            data['test_images'] = all_images_trans[num_train_images:]
+
+        for s in ['train', 'test']:
+            assert self.mode == 'sequence' or len(data[s + '_images']) == 1, \
+                "In pair mode, num train/test frames must be 1"
+
+            # Add a uniform noise to the center pos
+            jittered_anno = [self._get_jittered_box(a, s) for a in data[s + '_anno']]
+
+            # Crop image and mask region centered at jittered_anno box
+            crops, masks, boxes = prutils.jittered_center_crop_mask(
+                data[s + '_images'], jittered_anno, data[s + '_masks'], data[s + '_anno'],
+                self.search_area_factor, self.output_sz)
+
+            # Apply transforms
+            data[s + '_images'] = [self.transform[s](x) for x in crops]
+            data[s + '_masks'] = [x for x in masks]
+            data[s + '_anno'] = boxes
+
+        # Generate proposals
+        frame2_proposals, gt_iou = zip(*[self._generate_proposals(a) for a in data['test_anno']])
+
+        data['test_proposals'] = list(frame2_proposals)
+        data['proposal_iou'] = list(gt_iou)
+        data['train_masks'] = [torch.Tensor(x) for x in data['train_masks']]
+        data['test_masks'] = self._mask_crop(data['test_masks'], data['test_anno'])
 
         # Prepare output
         if self.mode == 'sequence':
