@@ -55,6 +55,6 @@ def sample_patch(im: torch.Tensor, pos: torch.Tensor, sample_sz: torch.Tensor, o
         return im_patch
 
     # Resample
-    im_patch = F.interpolate(im_patch, output_sz.long().tolist(), mode='bilinear')
+    im_patch = F.interpolate(im_patch, output_sz.long().tolist(), mode='bilinear', align_corners=False)
 
     return im_patch

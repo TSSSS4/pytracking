@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms
 
-from ltr.dataset import ImagenetVID
+from ltr.dataset import ImagenetVID, DAVIS
 from ltr.data import processing, sampler, LTRLoader
 import ltr.models.bbreg.atom as atom_models
 from ltr import actors
@@ -28,7 +28,7 @@ def run(settings):
     settings.proposal_params = {'min_iou': 0.1, 'boxes_per_frame': 16, 'sigma_factor': [0.01, 0.05, 0.1, 0.2, 0.3]}
 
     # Train datasets
-    vid_train = ImagenetVID()
+    davis_train = DAVIS()
 
     # The joint augmentation transform, that is applied to the pairs jointly
     transform_joint = dltransforms.ToGrayscale(probability=0.05)
@@ -48,7 +48,7 @@ def run(settings):
                                                       joint_transform=transform_joint)
 
     # The sampler for training
-    dataset_train = sampler.ATOMSampler([vid_train], [1],
+    dataset_train = sampler.ATOMSampler([davis_train], [1],
                                         samples_per_epoch=1000*settings.batch_size, max_gap=50,
                                         processing=data_processing_train)
 

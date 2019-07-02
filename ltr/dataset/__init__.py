@@ -6,3 +6,4 @@ from .coco_seq import MSCOCOSeq
 from .davis import DAVIS
 from .vot2016 import VOT2016
 from .youtubevos import YouTubeVOS_2018
+from .dataset_merge_split import dataset_merge_split

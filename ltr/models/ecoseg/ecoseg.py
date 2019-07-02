@@ -31,20 +31,13 @@ class ECOSeg(nn.Module):
         Note: If the training is done in sequence mode, that is, test_imgs.dim() == 5, then the batch dimension
         corresponds to the first dimensions. test_imgs is thus of the form [sequence, batch, feature, row, col]
         """
-        # num_sequences = train_imgs.shape[-4]    # This should be batch_size ??
-        # num_train_images = train_imgs.shape[0] if train_imgs.dim() == 5 else 1
-        # num_test_images = test_imgs.shape[0] if test_imgs.dim() == 5 else 1
 
         # Extract backbone features tensor(b,c,w,h)
         train_feat = self.extract_backbone_features(
             train_imgs.view(-1, train_imgs.shape[-3], train_imgs.shape[-2], train_imgs.shape[-1]))
         test_feat = self.extract_backbone_features(
             test_imgs.view(-1, test_imgs.shape[-3], test_imgs.shape[-2], test_imgs.shape[-1]))
-        # # (1,batch_size,c,w,h)
-        # train_feat = [feat.view(num_train_images, num_sequences, feat.shape[-3], feat.shape[-2], feat.shape[-1])
-        #               for feat in train_feat.values()]
-        # test_feat = [feat.view(num_test_images, num_sequences, feat.shape[-3], feat.shape[-2], feat.shape[-1])
-        #              for feat in test_feat.values()]
+
         train_feat = [feat for feat in train_feat.values()]     # {(b,c,w,h)} -> (b,c,w,h)
         train_feat = train_feat[0]
         test_feat = [feat for feat in test_feat.values()]

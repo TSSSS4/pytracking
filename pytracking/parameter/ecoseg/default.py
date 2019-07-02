@@ -2,12 +2,14 @@ from pytracking.utils import TrackerParams, FeatureParams
 from pytracking.features.extractor import MultiResolutionExtractor
 from pytracking.features import deep
 import torch
+from ltr.models.ecoseg import ReferenceNet, MaskNet
+
 
 def parameters():
     params = TrackerParams()
 
     params.debug = 0
-    params.visualization = False
+    params.visualization = True
 
     params.use_gpu = True
 
@@ -43,7 +45,8 @@ def parameters():
     params.train_skipping = 10          # How often to run training (every n-th frame)
 
     # Detection parameters
-    params.scale_factors = 1.02**torch.arange(-2, 3).float()     # What scales to use for localization
+    # params.scale_factors = 1.02**torch.arange(-2, 3).float()     # What scales to use for localization
+    params.scale_factors = 1.02 ** torch.arange(0, 1).float()
     params.score_upsample_factor = 1                             # How much Fourier upsampling to use
     params.score_fusion_strategy = 'weightedsum'                 # Fusion strategy
     shallow_params.translation_weight = 0.4                      # Weight of this feature
@@ -87,11 +90,47 @@ def parameters():
     deep_params.reg_window_power = 2            # The degree of the polynomial to use (e.g. 2 is a quadratic window)
     deep_params.reg_sparsity_threshold = 0.1    # A relative threshold of which DFT coefficients that should be set to zero
 
-
     fparams = FeatureParams(feature_params=[shallow_params, deep_params])
     features = deep.ResNet18m1(output_layers=['vggconv1', 'layer3'], use_gpu=params.use_gpu, fparams=fparams,
                                pool_stride=[2, 1], normalize_power=2)
 
     params.features = MultiResolutionExtractor([features])
 
+    input_dim = (256,)
+
+    # reference
+    reference_net = ReferenceNet(input_dim)
+    # mask net
+    mask_net = MaskNet(input_dim)
+
+    checkpoint_path = '/home/common/cxq/data/pytracking_backup/dataset/2/ECOSeg_ep0100.pth.tar'
+    reference_net, mask_net = load_checkpoint(checkpoint_path, reference_net, mask_net)
+
+    params.reference_net = reference_net.cuda().eval()
+    params.mask_net = mask_net.cuda().eval()
+
     return params
+
+
+def load_checkpoint(checkpoint_path, reference_net, mask_net):
+
+    def helper(model, loaded_state_dict, prefix=None):
+        model_state_dict = model.state_dict()
+        for key in model_state_dict.keys():
+            load_key = prefix + '.' + key
+            if loaded_state_dict[load_key] is not None:
+                model_state_dict[key] = loaded_state_dict[load_key]
+            else:
+                print('model load error:' + key)
+        model.load_state_dict(model_state_dict)
+        for param in model.parameters():
+            param.requires_grad = False
+        return model
+
+    checkpoint = torch.load(checkpoint_path)
+    loaded_state_dict = checkpoint['net']
+    reference_net = helper(reference_net, loaded_state_dict, 'reference')
+    mask_net = helper(mask_net, loaded_state_dict, 'masker')
+
+    return reference_net, mask_net
+

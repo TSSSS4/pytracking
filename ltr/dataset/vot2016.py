@@ -22,7 +22,7 @@ class VOT2016(BaseDataset):
 
     Download the dataset in https://davischallenge.org/davis2017/code.html.
     """
-    def __init__(self, root=None, image_loader=default_image_loader):
+    def __init__(self, root=None, image_loader=default_image_loader, mode='train', train_ratio=1):
         """
         args:
             root        - The path to the DAVIS folder, containing the training sets.
@@ -31,12 +31,19 @@ class VOT2016(BaseDataset):
             set_ids (None) - List containing the ids of the TrackingNet sets to be used for training. If None, all the
                             sets (0 - 11) will be used.
         """
+        assert ((train_ratio >= 0) and (train_ratio <= 1)), 'train ratio of dataset must be in the range of 0-1'
+
         root = os.path.join(env_settings().dataset_dir, 'VOT2016') if root is None else root
         super().__init__(root, image_loader)
         self.seq_path = os.path.join(root, 'sequences')
         self.mask_path = os.path.join(root, 'anno_seg')
 
         self.sequence_list = self._list_sequences(root)
+        train_num = int(len(self.sequence_list) * train_ratio)
+        if mode == 'train':
+            self.sequence_list = self.sequence_list[:train_num]
+        elif mode == 'val':
+            self.sequence_list = self.sequence_list[train_num:]
 
     def get_name(self):
         return 'VOT2016'

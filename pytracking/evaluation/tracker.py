@@ -9,7 +9,7 @@ class Tracker:
     args:
         name: Name of tracking method.
         parameter_name: Name of parameter file.
-        run_id: The run id.
+        run_id: The run id specify a number of the experiment.
     """
 
     def __init__(self, name: str, parameter_name: str, run_id: int = None):
@@ -60,6 +60,7 @@ class Tracker:
         self.parameters.free_memory()
 
         return output_bb, execution_times
+
     def run_video(self, videofilepath, optional_box=None, debug=None):
         """Run the tracker with the vieofile.
         args:

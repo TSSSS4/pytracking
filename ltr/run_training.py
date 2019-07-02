@@ -12,8 +12,6 @@ if env_path not in sys.path:
 
 import ltr.admin.settings as ws_settings
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-
 
 def run_training(train_module, train_name, cudnn_benchmark=True):
     """Run a train scripts in train_settings.
@@ -46,6 +44,8 @@ def run_training(train_module, train_name, cudnn_benchmark=True):
 
 
 def main():
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+
     # parser = argparse.ArgumentParser(description='Run a train scripts in train_settings.')
     # parser.add_argument('train_module', type=str, default='bbreg',
     #                     help='Name of module in the "train_settings/" folder.')
@@ -61,6 +61,7 @@ def main():
     # run_training(train_module='bbreg', train_name='atom1', cudnn_benchmark=True)
 
     run_training(train_module='ecoseg', train_name='finetune', cudnn_benchmark=True)
+    # run_training(train_module='ecoseg', train_name='debug', cudnn_benchmark=True)
 
 
 if __name__ == '__main__':

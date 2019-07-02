@@ -13,9 +13,9 @@ from ltr.solver import make_optimizer
 
 def run(settings):
     # Most common settings are assigned in the settings struct
-    settings.description = 'ECOSeg finetune.'
+    settings.description = 'ECOSeg debug.'
     settings.print_interval = 1                                 # How often to print loss and other info
-    settings.batch_size = 64                                    # Batch size
+    settings.batch_size = 32                                    # Batch size
     settings.iter_per_epoch = 1000
     settings.num_workers = 8                                    # Number of workers for image loading
     settings.normalize_mean = [0.485, 0.456, 0.406]             # Normalize mean (default pytorch ImageNet values)
@@ -40,12 +40,12 @@ def run(settings):
     # Train datasets
     train_ratio = 1
     davis_train = DAVIS(mode='train', train_ratio=train_ratio)
-    vot2016_train = VOT2016(mode='train', train_ratio=train_ratio)
+    vot2016_train = VOT2016(mode='train', train_ratio=0)
     youtubevos_train = YouTubeVOS_2018(mode='train', train_ratio=train_ratio)
 
     # Validation datasets
     davis_val = DAVIS(mode='val', train_ratio=train_ratio)
-    vot2016_val = VOT2016(mode='val', train_ratio=train_ratio)
+    vot2016_val = VOT2016(mode='val', train_ratio=0)
     youtubevos_val = YouTubeVOS_2018(mode='val', train_ratio=train_ratio)
 
     # The joint augmentation transform, that is applied to the pairs jointly
@@ -83,7 +83,7 @@ def run(settings):
                                                         joint_transform=transform_joint)
 
     # The sampler for training
-    dataset_train = sampler.ECOSegSampler([vot2016_train], [1], samples_per_epoch=1000*settings.batch_size,
+    dataset_train = sampler.ECOSegSampler([davis_train, youtubevos_train], [1,1], samples_per_epoch=1000*settings.batch_size,
                                           max_gap=50, processing=data_processing_train)
 
     # The loader for training
@@ -91,7 +91,7 @@ def run(settings):
                              shuffle=True, drop_last=True, stack_dim=1)
 
     # The sampler for validation
-    dataset_val = sampler.ECOSegSampler([vot2016_train], [1], samples_per_epoch=100 * settings.batch_size,
+    dataset_val = sampler.ECOSegSampler([vot2016_val], [1], samples_per_epoch=100 * settings.batch_size,
                                         max_gap=50, processing=data_processing_val)
 
     # The loader for validation

@@ -336,7 +336,7 @@ def perturb_box(box, min_iou=0.5, sigma_factor=0.1):
         # else reduce the perturb factor
         perturb_factor *= 0.9
 
-    return box_per,
+    return box_per, box_iou
 
 
 def perturb_box_v2(box, min_iou=0.5, sigma_factor=0.1):

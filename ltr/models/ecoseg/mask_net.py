@@ -21,15 +21,12 @@ class MaskNet(nn.Module):
         # self.post_processor = MaskPostProcessor()   # Only for evaluation
 
     def forward(self, feat, bbox):
-        # assert feat[0].dim() == 5, 'Expect 5 dimensional reference feat'
-
-        # # Extract first train sample
-        # feat = feat[0, ...]
-        # bbox = bbox[0, ...]
 
         # Add batch_index to rois
-        batch_size = bbox.size()[0]
+        batch_size = feat.size()[0]
+        boxes_per_frame = int(bbox.size()[0] / batch_size)
         batch_index = torch.Tensor([x for x in range(batch_size)]).view(batch_size, 1).to(bbox.device)
+        batch_index = batch_index.repeat_interleave(boxes_per_frame, dim=0)
 
         bbox[:, 2:4] = bbox[:, 0:2] + bbox[:, 2:4]
         rois = torch.cat((batch_index, bbox), dim=1)
@@ -40,7 +37,11 @@ class MaskNet(nn.Module):
         # Mask
         feat = self.feature_extractor(feat)
         mask_logits = self.predictor(feat)
-        return mask_logits
+
+        if self.training:
+            return mask_logits
+        else:
+            return mask_logits.sigmoid()
 
 
 class ResNet18Conv4FeatureExtractor(nn.Module):
@@ -84,4 +85,5 @@ class MaskRCNNC4Predictor(nn.Module):
     def forward(self, x):
         x = F.relu(self.conv5_mask(x))
         return self.mask_fcn_logits(x)
+
 

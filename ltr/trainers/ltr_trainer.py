@@ -5,6 +5,7 @@ from ltr.admin.stats import AverageMeter, StatValue
 from ltr.admin.tensorboard import TensorboardWriter
 import torch
 import time
+import datetime
 
 
 class LTRTrainer(BaseTrainer):
@@ -26,7 +27,8 @@ class LTRTrainer(BaseTrainer):
         self.stats = OrderedDict({loader.name: None for loader in self.loaders})
 
         # Initialize tensorboard
-        tensorboard_writer_dir = os.path.join(self.settings.env.tensorboard_dir, self.settings.project_path)
+        TIMESTAMP = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        tensorboard_writer_dir = os.path.join(self.settings.env.tensorboard_dir, self.settings.project_path, TIMESTAMP)
         self.tensorboard_writer = TensorboardWriter(tensorboard_writer_dir, [l.name for l in loaders])
 
     def _set_default_settings(self):
@@ -111,7 +113,10 @@ class LTRTrainer(BaseTrainer):
         # Record learning rate
         for loader in self.loaders:
             if loader.training:
-                lr_list = self.lr_scheduler.get_lr()
+                try:
+                    lr_list = self.lr_scheduler.get_lr()
+                except:
+                    lr_list = [pg['lr'] for pg in self.optimizer.param_groups]
                 for i, lr in enumerate(lr_list):
                     var_name = 'LearningRate/group{}'.format(i)
                     if var_name not in self.stats[loader.name].keys():

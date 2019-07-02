@@ -16,3 +16,13 @@ def uav_test():
 
     dataset = UAVDataset()
     return trackers, dataset
+
+
+def eco_otb():
+    # Run ECO on OTB dataset
+    trackers = [Tracker('eco', 'default', i) for i in range(1)]
+
+    dataset = OTBDataset()
+
+    return trackers, dataset
+

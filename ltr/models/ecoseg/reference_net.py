@@ -29,11 +29,6 @@ class ReferenceNet(nn.Module):
         self.fc = LinearBlock(256, input_dim[0], resolution)
 
     def forward(self, feat, bbox):
-        # assert feat[0].dim() == 5, 'Expect 5 dimensional reference feat'
-        #
-        # # Extract first train sample
-        # feat = [f[0, ...] for f in feat]
-        # bbox = bbox[0, ...]
 
         # Add batch_index to rois
         batch_size = bbox.size()[0]
@@ -41,14 +36,6 @@ class ReferenceNet(nn.Module):
 
         bbox[:, 2:4] = bbox[:, 0:2] + bbox[:, 2:4]      # xyxy
         rois = torch.cat((batch_index, bbox), dim=1)
-
-        # Modulation vector calculation
-        # output = []
-        # for x in feat:
-        #     x = self.conv1(x)  # feat = [feat_layer3(b,c,w,h), ]
-        #     x = self.prroi_pool(x, rois)
-        #     output.append(self.fc(x))
-        # return output
 
         feat = self.conv1(feat)
         feat = self.prroi_pool(feat, rois)

@@ -37,22 +37,28 @@ class DAVIS(BaseDataset):
 
     Download the dataset in https://davischallenge.org/davis2017/code.html.
     """
-    def __init__(self, root=None, image_loader=default_image_loader):
+    def __init__(self, root=None, image_loader=default_image_loader, mode='train', train_ratio=1):
         """
         args:
             root        - The path to the DAVIS folder, containing the training sets.
             image_loader (jpeg4py_loader) -  The function to read the images. jpeg4py (https://github.com/ajkxyz/jpeg4py)
                                             is used by default.
-            set_ids (None) - List containing the ids of the TrackingNet sets to be used for training. If None, all the
-                            sets (0 - 11) will be used.
+            mode - The current dataset mode, train or val.
+            train_ratio - The ratio of train data.
         """
+        assert ((train_ratio >= 0) and (train_ratio <= 1)), 'train ratio of dataset must be in the range of 0-1'
+
         root = env_settings().davis_dir if root is None else root
         super().__init__(root, image_loader)
         self.anno_path = os.path.join(root, 'Annotations/480p')
         self.seq_path = os.path.join(root, 'JPEGImages/480p')
 
         self.sequence_list = self._list_sequences(root)
-        # self.black_list = self.black_list_init(os.path.join(root, 'black_list.txt'))
+        train_num = int(len(self.sequence_list) * train_ratio)
+        if mode == 'train':
+            self.sequence_list = self.sequence_list[:train_num]
+        elif mode == 'val':
+            self.sequence_list = self.sequence_list[train_num:]
 
     def get_name(self):
         return 'davis'

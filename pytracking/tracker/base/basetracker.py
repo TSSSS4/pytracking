@@ -27,19 +27,21 @@ class BaseTracker:
 
         # Initialize
         image = self._read_image(sequence.frames[0])
+        init_state = dict()
+        init_state['bbox'] = sequence.init_state
 
         times = []
         start_time = time.time()
-        self.initialize(image, sequence.init_state)
+        self.initialize(image, init_state['bbox'])
         init_time = getattr(self, 'time', time.time() - start_time)
         times.append(init_time)
 
         if self.params.visualization:
             self.init_visualization()
-            self.visualize(image, sequence.init_state)
+            self.visualize(image, init_state)
 
         # Track
-        tracked_bb = [sequence.init_state]
+        tracked_bb = [init_state['bbox']]
         for frame in sequence.frames[1:]:
             image = self._read_image(frame)
 
@@ -47,7 +49,10 @@ class BaseTracker:
             state = self.track(image)
             times.append(time.time() - start_time)
 
-            tracked_bb.append(state)
+            if type(state) is dict:
+                tracked_bb.append(state['bbox'])
+            else:
+                tracked_bb.append(state)
 
             if self.params.visualization:
                 self.visualize(image, state)

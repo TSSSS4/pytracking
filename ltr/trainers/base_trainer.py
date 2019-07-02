@@ -47,7 +47,6 @@ class BaseTrainer:
         else:
             self._checkpoint_dir = None
 
-
     def train(self, max_epochs, load_latest=False, fail_safe=True):
         """Do training for the given number of epochs.
         args:
@@ -66,10 +65,13 @@ class BaseTrainer:
                 for epoch in range(self.epoch+1, max_epochs+1):
                     self.epoch = epoch
 
-                    if self.lr_scheduler is not None:
-                        self.lr_scheduler.step()
-
                     self.train_epoch()
+
+                    if self.lr_scheduler is not None:
+                        if self.lr_scheduler.__class__ == torch.optim.lr_scheduler.ReduceLROnPlateau:
+                            self.lr_scheduler.step(self.stats['val']['Loss'].history[-1])
+                        else:
+                            self.lr_scheduler.step()
 
                     if self._checkpoint_dir:
                         self.save_checkpoint()
@@ -83,10 +85,8 @@ class BaseTrainer:
 
         print('Finished training!')
 
-
     def train_epoch(self):
         raise NotImplementedError
-
 
     def save_checkpoint(self):
         """Saves a checkpoint of the network and other variables."""
@@ -105,14 +105,12 @@ class BaseTrainer:
             'settings': self.settings
         }
 
-
         directory = '{}/{}'.format(self._checkpoint_dir, self.settings.project_path)
         if not os.path.exists(directory):
             os.makedirs(directory)
 
         file_path = '{}/{}_ep{:04d}.pth.tar'.format(directory, net_type, self.epoch)
         torch.save(state, file_path)
-
 
     def load_checkpoint(self, checkpoint = None, fields = None, ignore_fields = None, load_constructor = False):
         """Loads a network checkpoint file.

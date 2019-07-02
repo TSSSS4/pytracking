@@ -2,6 +2,11 @@ from pytracking.tracker.base import BaseTracker
 import torch
 import torch.nn.functional as F
 import math
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
 from pytracking import complex, dcf, fourier, TensorList
 from pytracking.libs.tensorlist import tensor_operation
 from pytracking.features.preprocessing import numpy_to_torch
@@ -11,12 +16,26 @@ from .optim import FilterOptim, FactorizedConvProblem
 from pytracking.features import augmentation
 
 
-class ECO(BaseTracker):
+class ECOSeg(BaseTracker):
 
     def initialize_features(self):
         if not getattr(self, 'features_initialized', False):
             self.params.features.initialize()
         self.features_initialized = True
+
+    def initialize_mask(self, im):
+        # feats[0]:(1,96,60,60) feats[1]:(1,256,15,15)
+        feats = self.params.features.extract(im, self.pos.round(), self.target_scale, self.img_sample_sz)
+
+        # bbox ((x0,y0,w,h))
+        # bbox = torch.cat((self.pos[[1, 0]] - (self.target_sz[[1, 0]] - 1) / 2, self.target_sz[[1, 0]])).unsqueeze(0).cuda()
+        pos_sample = self.img_sample_sz / 2
+        target_sz = self.base_target_sz[[1, 0]]
+        bbox = torch.cat((pos_sample - (target_sz - 1) / 2, target_sz)).unsqueeze(0).cuda()
+
+        # reference weight (1,c,w,h)
+        self.reference_weight = self.params.reference_net(feats[1], bbox).unsqueeze(2).unsqueeze(3)
+        del self.params.reference_net
 
     def initialize(self, image, state, *args, **kwargs):
 
@@ -24,6 +43,9 @@ class ECO(BaseTracker):
         self.frame_num = 1
         if not hasattr(self.params, 'device'):
             self.params.device = 'cuda' if self.params.use_gpu else 'cpu'
+
+        # Image size
+        self.img_sz = torch.Tensor(image.shape[:2])
 
         # Initialize features
         self.initialize_features()
@@ -92,6 +114,9 @@ class ECO(BaseTracker):
 
         # Convert image
         im = numpy_to_torch(image)
+
+        # MaskNet initialization
+        self.initialize_mask(im)
 
         # Setup bounds
         self.image_sz = torch.Tensor([im.shape[2], im.shape[3]])
@@ -183,12 +208,21 @@ class ECO(BaseTracker):
         # Get sample
         sample_pos = self.pos.round()
         sample_scales = self.target_scale * self.params.scale_factors
-        test_xf = self.extract_fourier_sample(im, sample_pos, sample_scales, self.img_sample_sz)
+        feats = self.extract_sample(im, sample_pos, sample_scales, self.img_sample_sz)
+        test_xf = self.preprocess_sample(self.project_sample(feats))
 
+        # Stage 1
         # Compute scores
         sf = self.apply_filter(test_xf)
         translation_vec, scale_ind, s = self.localize_target(sf)
         scale_change_factor = self.params.scale_factors[scale_ind]
+
+        # Update position and scale
+        # self.update_state(sample_pos + translation_vec, self.target_scale * scale_change_factor)
+
+        # Stage 2
+        # Mask and Update position and scale
+        translation_vec, mask = self.mask_locate(feats, translation_vec)
 
         # Update position and scale
         self.update_state(sample_pos + translation_vec, self.target_scale * scale_change_factor)
@@ -220,7 +254,7 @@ class ECO(BaseTracker):
         # Return new state
         new_state = torch.cat((self.pos[[1,0]] - (self.target_sz[[1,0]]-1)/2, self.target_sz[[1,0]]))
 
-        return new_state.tolist()
+        return {'bbox': new_state.tolist(), 'mask': mask}
 
     def apply_filter(self, sample_xf: TensorList) -> torch.Tensor:
         return complex.mult(self.filter, sample_xf).sum(1, keepdim=True)
@@ -361,3 +395,193 @@ class ECO(BaseTracker):
         for hf in self.filter:
             hf[:,:,:,0,:] /= 2
             hf[:,:,:,0,:] += complex.conj(hf[:,:,:,0,:].flip((2,)))
+
+    def mask_locate(self, feats, translation_vec):
+
+        # (cy,cx,h,w) -> (cx,cy,w,h)
+        translation_vec = translation_vec[[1, 0]]
+        pos = self.pos[[1, 0]]
+        target_sz = self.target_sz[[1, 0]]
+        pos_sample = self.img_sample_sz / 2 + translation_vec
+
+        # roi feat
+        mask_feat = feats[1].mul(self.reference_weight)
+
+        # mask (14,14)
+        bbox_sample = torch.cat((pos_sample - (self.target_sz - 1) / 2, self.target_sz)).cuda()  # (cx,cy,w,h)
+        mask = self.params.mask_net(mask_feat, bbox_sample.unsqueeze(0)).squeeze()
+
+        # mask on image (h,w)
+        bbox_img = torch.cat((pos + translation_vec, target_sz)).cuda()  # (cx,cy,w,h)
+        im_mask = self.masker(mask, bbox_img, padding=1, thresh=0.5, im_sz=self.img_sz)
+
+        # bbox calculate
+        mask = im_mask.detach().cpu().numpy().squeeze()
+        # box = self.mask_to_box(mask, mode='polygon')
+
+        # locate
+
+        # if self.params.visualize:
+        #     self.plot(sample, mask, box)
+
+        return translation_vec[[1, 0]], mask
+
+    def plot(self, sample, mask, box):
+        # bbox plot
+        sample = sample.permute(2, 3, 1, 0).squeeze().numpy().astype(np.uint8)
+        res = cv2.polylines(sample, [box], True, (0, 255, 0))
+        contours, hierarchy = self.find_contours(
+            mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+        )
+        # contour plot
+        res = cv2.drawContours(res, contours, -1, (0, 255, 0), 3)
+        plt.ion()
+        plt.imshow(res)
+        plt.pause(0.1)
+
+    def visualize(self, image, state):
+        self.ax.cla()
+        self.ax.imshow(image)
+        bbox = state['bbox']
+        rect = patches.Rectangle((bbox[0], bbox[1]), bbox[2], bbox[3], linewidth=1, edgecolor='r', facecolor='none')
+        self.ax.add_patch(rect)
+
+        if state.__contains__('mask'):
+            plt.contour(state['mask'], colors='red', linewidths=1.0)
+
+        if hasattr(self, 'gt_state') and False:
+            gt_state = self.gt_state
+            rect = patches.Rectangle((gt_state[0], gt_state[1]), gt_state[2], gt_state[3], linewidth=1, edgecolor='g',
+                                     facecolor='none')
+            self.ax.add_patch(rect)
+        self.ax.set_axis_off()
+        self.ax.axis('equal')
+        plt.draw()
+        plt.pause(0.001)
+
+        if self.pause_mode:
+            plt.waitforbuttonpress()
+
+    @staticmethod
+    def masker(mask, bbox, padding, thresh, im_sz):
+        im_w = int(im_sz[1])
+        im_h = int(im_sz[0])
+
+        # expand mask
+        M = mask.shape[-1]
+        pad2 = 2 * padding
+        scale = float(M + pad2) / M
+        padded_mask = mask.new_zeros((M + pad2, M + pad2))
+        padded_mask[padding:-padding, padding:-padding] = mask
+        mask = padded_mask
+
+        # # expand box
+        # w_half = (bbox[2] - bbox[0]) * .5
+        # h_half = (bbox[3] - bbox[1]) * .5
+        # x_c = (bbox[2] + bbox[0]) * .5
+        # y_c = (bbox[3] + bbox[1]) * .5
+        #
+        # w_half *= scale
+        # h_half *= scale
+        #
+        # bbox_exp = torch.zeros_like(bbox)
+        # bbox_exp[0] = x_c - w_half
+        # bbox_exp[2] = x_c + w_half
+        # bbox_exp[1] = y_c - h_half
+        # bbox_exp[3] = y_c + h_half
+        # bbox = bbox_exp.to(dtype=torch.int32)
+        #
+        # #
+        # TO_REMOVE = 1
+        # w = int(bbox[2] - bbox[0] + TO_REMOVE)
+        # h = int(bbox[3] - bbox[1] + TO_REMOVE)
+        # w = max(w, 1)
+        # h = max(h, 1)
+
+        # expand box
+        w_half = bbox[2] * .5
+        h_half = bbox[3] * .5
+        x_c = bbox[0]
+        y_c = bbox[1]
+
+        w_half *= scale
+        h_half *= scale
+
+        bbox_exp = torch.zeros_like(bbox)
+        bbox_exp[0] = x_c - w_half
+        bbox_exp[2] = x_c + w_half
+        bbox_exp[1] = y_c - h_half
+        bbox_exp[3] = y_c + h_half
+        bbox = bbox_exp.to(dtype=torch.int32)
+
+        #
+        TO_REMOVE = 1
+        w = int(bbox[2] - bbox[0] + TO_REMOVE)
+        h = int(bbox[3] - bbox[1] + TO_REMOVE)
+        w = max(w, 1)
+        h = max(h, 1)
+
+        # Resize mask to bbox size
+        mask = mask.expand((1, 1, -1, -1))
+        mask = F.interpolate(mask, size=(h, w), mode='bilinear', align_corners=False)
+        mask = mask.squeeze()
+        # mask threshold
+        if thresh >= 0:
+            mask = mask > thresh
+        else:
+            # for visualization and debugging, we also
+            # allow it to return an unmodified mask
+            mask = (mask * 255).to(torch.uint8)
+
+        # paste mask to sample image
+        im_mask = torch.zeros((im_h, im_w), dtype=torch.uint8)
+        x_0 = max(bbox[0], 0)
+        x_1 = min(bbox[2] + 1, im_w)
+        y_0 = max(bbox[1], 0)
+        y_1 = min(bbox[3] + 1, im_h)
+
+        im_mask[y_0:y_1, x_0:x_1] = mask[(y_0 - bbox[1]): (y_1 - bbox[1]),
+                                         (x_0 - bbox[0]): (x_1 - bbox[0])]
+        return im_mask
+
+    @staticmethod
+    def mask_to_box(mask, mode):
+        """
+        Calculate bounding box according to binary mask.
+        :param mask: binary mask (w,h)
+        :param mode: rectangle or polygon
+        :return: 4 corners of bounding box ndarray([[x1,y1],[x2,y2],[x3,y3],[x4,y4]])
+        """
+        idx = np.where(mask == 1)               # (2,n)
+        if mode == 'polygon':
+            idx = np.array(idx).transpose(1, 0)     # (n,2)
+            rect = cv2.minAreaRect(idx)             # tuple((cx,cy), (w,h), angle)
+            box = cv2.boxPoints(rect)               # (4,2)
+            box = np.int0(box)
+            box = np.array([p[-1::-1] for p in box])
+        elif mode == 'rectangle':
+            box = np.array([[idx[0].min(), idx[1].min()],
+                            [idx[0].max(), idx[1].min()],
+                            [idx[0].max(), idx[1].max()],
+                            [idx[0].min(), idx[1].max()]])
+        return box
+
+    @staticmethod
+    def find_contours(*args, **kwargs):
+        """
+        Wraps cv2.findContours to maintain compatiblity between versions
+        3 and 4
+
+        Returns:
+            contours, hierarchy
+        """
+        if cv2.__version__.startswith('4'):
+            contours, hierarchy = cv2.findContours(*args, **kwargs)
+        elif cv2.__version__.startswith('3'):
+            _, contours, hierarchy = cv2.findContours(*args, **kwargs)
+        else:
+            raise AssertionError(
+                'cv2 must be either version 3 or 4 to call this method')
+
+        return contours, hierarchy
+
